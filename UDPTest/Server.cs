@@ -35,35 +35,42 @@ namespace UDPTest
                 var dequeue = Receiver.Buffer.TryDequeue(out var payload);
                 if (dequeue)
                 {
-                    var messageRaw = Utility.FromByteArray(payload.Buffer);
-                    var messageParts = messageRaw.Split('|');
-                    var messageId = Guid.Parse(messageParts[0]);
-                    var message = messageParts[1];
+                    var message = Utility.FromPayload(payload);
+
+                    if (!string.IsNullOrEmpty(message.Error))
+                    {
+                        Console.WriteLine(message.Error);
+                    }
 
                     var port = payload.RemoteEndPoint.Port;
 
-                    Console.WriteLine("Received client: " + port + " id: " + messageId);
+                    Console.WriteLine("Received client: " + port + " id: " + message.Id.ToString().Split('-').Last());
 
                     //if this is the first time a message has been received by this client, add their port to the bag
                     if (!_clients.Contains(port) && port != Config.SERVER_PORT)
                     {
                         _clients.Add(port);
+
                         Console.WriteLine("Registered new client: " + port);
                     }
 
                     //broadcast message to all clients (including original sender, as an acknowledgement)
                     // however original sender gets original messageId, other clients get new id's for future acknowledgements
+                    var originalId = message.Id;
                     foreach (var client in _clients)
                     {
-                        var id = Guid.NewGuid();
                         if (client == port)
                         {
-                            id = messageId;
+                            message.Id = originalId;
+                        }
+                        else
+                        {
+                            message.Id = Guid.NewGuid();
                         }
 
-                        await Sender.Send(_udp, Config.SERVER_HOSTNAME, client, message, id);
+                        await Sender.Send(_udp, Config.SERVER_HOSTNAME, client, message);
 
-                        Console.WriteLine("Sent client: " + client + " id: " + id);
+                        if (client != port) Console.WriteLine("Sent client: " + client + " id: " + message.Id.ToString().Split('-').Last());
                     }
                 }
             }

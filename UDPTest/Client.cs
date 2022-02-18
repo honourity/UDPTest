@@ -26,7 +26,8 @@ namespace UDPTest
             Console.WriteLine("Client started");
 
             //hit server to register this client
-            await SendMessage(".", Guid.NewGuid());
+            var message = new Message() { TestValue = string.Empty };
+            await SendMessage(message);
 
             Console.WriteLine("Starting input listener");
             _ = UserInput();
@@ -49,7 +50,8 @@ namespace UDPTest
                     
                     if (!string.IsNullOrWhiteSpace(input))
                     {
-                        SendMessage(input, Guid.NewGuid()).Wait();
+                        var message = new Message() { TestValue = input };
+                        SendMessage(message).Wait();
                     }
                 }
             });
@@ -65,21 +67,23 @@ namespace UDPTest
                 var dequeue = Receiver.Buffer.TryDequeue(out var payload);
                 if (dequeue)
                 {
-                    var messageRaw = Utility.FromByteArray(payload.Buffer);
-                    var messageParts = messageRaw.Split('|');
-                    var messageId = Guid.Parse(messageParts[0]);
-                    var message = messageParts[1];
+                    var message = Utility.FromPayload(payload);
+
+                    if (!string.IsNullOrEmpty(message.Error))
+                    {
+                        Console.WriteLine(message.Error);
+                    }
 
                     //only accept messages from the server
                     if (payload.RemoteEndPoint.Port == Config.SERVER_PORT)
                     {
-                        if (_pendingMessages.ContainsKey(messageId))
+                        if (_pendingMessages.ContainsKey(message.Id))
                         {
-                            var removed = _pendingMessages.Remove(messageId, out var removedMessage);
+                            var removed = _pendingMessages.Remove(message.Id, out var removedMessage);
 
                             if (removed)
                             {
-                                Console.WriteLine("Acknowledged " + messageId);
+                                Console.WriteLine("Acknowledged " + message.Id.ToString().Split('-').Last());
                             }
                             else
                             {
@@ -88,35 +92,39 @@ namespace UDPTest
                         }
                         else
                         {
-                            Console.WriteLine("Received " + messageId);
+                            Console.WriteLine("Received " + message.Id.ToString().Split('-').Last());
                         }
+                    }
+                    else
+                    {
+                        Console.WriteLine("Received a message but remote endpoint port isnt server");
                     }
                 }
             }
 
             //resend messages which have not been acknowledged beyond a certain timeframe
-            var messagesToRetry = _pendingMessages.Where(m => (DateTime.Now - m.Value.DateSent) > TimeSpan.FromMilliseconds(Config.TIME_BEFORE_RETRY_MS));
-            foreach (var message in messagesToRetry)
+            var pendingRetryMessages = _pendingMessages.Where(m => (DateTime.Now - m.Value.DateSent) > TimeSpan.FromMilliseconds(Config.TIME_BEFORE_RETRY_MS));
+            foreach (var pendingRetryMessage in pendingRetryMessages)
             {
-                Console.WriteLine("Resending: " + message.Key);
+                Console.WriteLine("Resending: " + pendingRetryMessage.Value.Message.Id.ToString().Split('-').Last());
 
                 //resetting the timer on each message which is being re-sent
-                message.Value.DateSent = DateTime.Now;
+                pendingRetryMessage.Value.DateSent = DateTime.Now;
 
-                await SendMessage(message.Value.Message, message.Key);
+                await SendMessage(pendingRetryMessage.Value.Message);
             }
         }
 
-        private async Task SendMessage(string message, Guid messageId)
+        private async Task SendMessage(Message message)
         {
-            _pendingMessages.TryAdd(messageId, new PendingMessage() { DateSent = DateTime.Now, Message = message });
-            await Sender.Send(_udp, Config.SERVER_HOSTNAME, Config.SERVER_PORT, message, messageId);
+            _pendingMessages.TryAdd(message.Id, new PendingMessage() { DateSent = DateTime.Now, Message = message });
+            await Sender.Send(_udp, Config.SERVER_HOSTNAME, Config.SERVER_PORT, message);
         }
     }
 
     public class PendingMessage
     {
         public DateTime DateSent { get; set; }
-        public string Message { get; set; } = string.Empty;
+        public Message? Message { get; set; }
     }
 }
