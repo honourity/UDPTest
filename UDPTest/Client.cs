@@ -18,12 +18,13 @@ namespace UDPTest
             _udp.DontFragment = true;
 
             _port = (_udp.Client.LocalEndPoint as IPEndPoint)?.Port ?? 0;
-            _ = Receiver.Receive(_udp);
         }
 
         public async Task Run()
         {
             Console.WriteLine("Client started");
+
+            _ = Receiver.Receive(_udp);
 
             //hit server to register this client
             var message = new Message() { TestValue = string.Empty };
@@ -106,19 +107,25 @@ namespace UDPTest
             var pendingRetryMessages = _pendingMessages.Where(m => (DateTime.Now - m.Value.DateSent) > TimeSpan.FromMilliseconds(Config.TIME_BEFORE_RETRY_MS));
             foreach (var pendingRetryMessage in pendingRetryMessages)
             {
-                Console.WriteLine("Resending: " + pendingRetryMessage.Value.Message.Id.ToString().Split('-').Last());
+                if (pendingRetryMessage.Value.Message != null)
+                {
+                    Console.WriteLine("Resending: " + pendingRetryMessage.Value.Message.Id.ToString().Split('-').Last());
 
-                //resetting the timer on each message which is being re-sent
-                pendingRetryMessage.Value.DateSent = DateTime.Now;
+                    //resetting the timer on each message which is being re-sent
+                    pendingRetryMessage.Value.DateSent = DateTime.Now;
 
-                await SendMessage(pendingRetryMessage.Value.Message);
+                    await SendMessage(pendingRetryMessage.Value.Message);
+                }
             }
         }
 
         private async Task SendMessage(Message message)
         {
-            _pendingMessages.TryAdd(message.Id, new PendingMessage() { DateSent = DateTime.Now, Message = message });
-            await Sender.Send(_udp, Config.SERVER_HOSTNAME, Config.SERVER_PORT, message);
+            if (message != null)
+            {
+                _pendingMessages.TryAdd(message.Id, new PendingMessage() { DateSent = DateTime.Now, Message = message });
+                await Sender.Send(_udp, Config.SERVER_HOSTNAME, Config.SERVER_PORT, message);
+            }
         }
     }
 
